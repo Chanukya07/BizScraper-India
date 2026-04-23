@@ -3,8 +3,11 @@ main.py — Entry point for the Business Listing Data Collection System.
 
 Usage:
     python main.py
-    python main.py --location "Rajahmundry"
-    python main.py --location "Hyderabad" --no-headless --output ./data
+    python main.py --no-headless
+    python main.py --output ./data
+
+NOTE: Location is ALWAYS entered manually by the user at runtime.
+      It is never hardcoded or passed via CLI.
 """
 
 import argparse
@@ -109,21 +112,34 @@ def collect_category(driver, category: str, queries: list, location: str,
     return final
 
 
-# ── Input ──────────────────────────────────────────────────────────────────────
-def get_location(cli: str = None) -> str:
-    if cli:
-        return cli.strip()
+# ── Manual location input (ALWAYS prompted, never auto-filled) ─────────────────
+def get_location() -> str:
+    """
+    Always prompts the user to manually type the location.
+    No CLI argument, no default, no hardcoding — pure interactive input.
+    Keeps asking until a non-empty value is entered.
+    """
+    print()
+    print("  ┌─────────────────────────────────────────────┐")
+    print("  │         📍 LOCATION INPUT REQUIRED          │")
+    print("  └─────────────────────────────────────────────┘")
     while True:
-        loc = input("\nEnter location (e.g., Rajahmundry, Hyderabad, etc.): ").strip()
+        loc = input("  Enter location (e.g., Rajahmundry, Hyderabad, Vizag): ").strip()
         if loc:
-            return loc
-        print("  ⚠️  Location cannot be empty. Please try again.")
+            # Confirm back to user
+            confirm = input(f"  ✅ You entered: '{loc.title()}' — Confirm? [Y/n]: ").strip().lower()
+            if confirm in ('', 'y', 'yes'):
+                return loc
+            else:
+                print("  🔄 Let's try again...\n")
+        else:
+            print("  ⚠️  Location cannot be empty. Please type a city name.")
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     ap = argparse.ArgumentParser(description='BizScraper-India: Business Listing Collector')
-    ap.add_argument('--location', type=str, default=None, help='City/location name')
+    # NOTE: No --location argument — location is always entered manually
     ap.add_argument('--headless', action='store_true', default=True)
     ap.add_argument('--no-headless', dest='headless', action='store_false',
                     help='Show browser window (useful for debugging/CAPTCHA)')
@@ -136,15 +152,19 @@ def main():
     print("  Built with Selenium + BeautifulSoup + Pandas")
     print("="*55)
 
-    location = get_location(args.location)
-    print(f"\n🌍 Location: {location.title()}")
-    os.makedirs(args.output, exist_ok=True)
+    # ── Location: ALWAYS manual user input ────────────────────────────────────
+    location = get_location()
+    print(f"\n  🌍 Collecting data for: {location.title()}")
+    print(f"  📁 Output folder     : {args.output}")
+    print(f"  🖥️  Browser mode      : {'Headless' if args.headless else 'Visible'}")
+    print()
 
-    state = load_resume(location)
+    os.makedirs(args.output, exist_ok=True)
+    state    = load_resume(location)
     collected = state.get('data', {c: [] for c in CATEGORIES})
     all_queries = get_all_queries(location)
 
-    print(f"\n🚀 Starting browser (headless={args.headless})...")
+    print(f"  🚀 Starting browser...")
     driver = build_driver(headless=args.headless)
 
     try:
@@ -152,7 +172,7 @@ def main():
         for cat in CATEGORIES:
             existing = collected.get(cat, [])
             if len(existing) >= TARGET:
-                print(f"\n✅ {cat} already complete ({len(existing)} entries). Skipping.")
+                print(f"\n  ✅ {cat} already complete ({len(existing)} entries). Skipping.")
                 final[cat] = existing[:TARGET]
                 continue
             result = collect_category(driver, cat, all_queries[cat],
@@ -161,22 +181,23 @@ def main():
             collected[cat] = result
             save_resume(location, collected)
 
-        print("\n\n📊 Exporting to Excel...")
+        print("\n\n  📊 Exporting to Excel...")
         path = export_to_excel(final, location, args.output)
 
         print(f"\n{'='*55}")
-        print(f"  ✅ SUCCESS!")
-        print(f"  📁 File: {path}")
+        print(f"  ✅ ALL DONE!")
+        print(f"  📁 Saved to: {path}")
+        print(f"  📍 Location: {location.title()}")
         for cat, ents in final.items():
             real = sum(1 for e in ents if e.get('phone', '') != 'N/A')
-            print(f"     • {cat}: {real}/75 valid entries")
+            print(f"     • {cat.replace('_',' '):<20} {real:>3}/75 valid entries")
         print(f"{'='*55}\n")
 
         if os.path.exists(RESUME_FILE):
             os.remove(RESUME_FILE)
 
     except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted. Progress saved. Run again to resume.")
+        print("\n\n  ⚠️  Interrupted. Progress saved. Run again to resume.")
         save_resume(location, collected)
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
